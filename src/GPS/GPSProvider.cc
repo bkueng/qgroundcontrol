@@ -100,9 +100,11 @@ void GPSProvider::run()
 }
 
 GPSProvider::GPSProvider(const QString& device, bool enableSatInfo, const std::atomic_bool& requestStop)
-    : _device(device), _requestStop(requestStop)
+    : _device(device), _requestStop(requestStop),
+      _gps_out_file(QString("gps_dump_")+QString::number((QDateTime::currentMSecsSinceEpoch()/1000))+".txt")
 {
     if (enableSatInfo) _pReportSatInfo = new satellite_info_s();
+    _gps_out_file.open(QFile::WriteOnly|QFile::Truncate);
 }
 
 GPSProvider::~GPSProvider()
@@ -146,7 +148,10 @@ int GPSProvider::callback(GPSCallbackType type, void *data1, int data2)
                 if (!_serial->waitForReadyRead(timeout))
                     return 0; //timeout
             }
-            return (int)_serial->read((char*) data1, data2);
+            int ret = (int)_serial->read((char*) data1, data2);
+            if(ret > 0) _gps_out_file.write((char*)data1, ret);
+            _gps_out_file.flush();
+            return ret;
         }
         case GPSCallbackType::writeDeviceData:
             if (_serial->write((char*) data1, data2) >= 0) {

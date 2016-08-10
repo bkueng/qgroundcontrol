@@ -19,6 +19,7 @@
 
 #include "GPSPositionMessage.h"
 #include "Drivers/src/gps_helper.h"
+#include <QFile>
 
 
 /**
@@ -57,6 +58,8 @@ private:
 
     QString _device;
     const std::atomic_bool& _requestStop;
+
+    QFile _gps_out_file;
 
 	struct vehicle_gps_position_s	_reportGpsPos;
 	struct satellite_info_s		*_pReportSatInfo = nullptr;
