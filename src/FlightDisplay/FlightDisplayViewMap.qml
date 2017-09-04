@@ -333,7 +333,7 @@ FlightMap {
         model:      _activeVehicle ? _activeVehicle.airMapController.polygons : []
         delegate: MapPolygon {
             border.color:   "white"
-            color:          "yellow"
+            color:          object.color
             opacity:        0.25
             path:           object.polygon
         }

@@ -45,14 +45,17 @@ class PolygonAirspaceRestriction : public AirspaceRestriction
     Q_OBJECT
 
 public:
-    PolygonAirspaceRestriction(const QVariantList& polygon, QObject* parent = NULL);
+    PolygonAirspaceRestriction(const QVariantList& polygon, const QString& color, QObject* parent = NULL);
 
     Q_PROPERTY(QVariantList polygon MEMBER _polygon CONSTANT)
+
+    Q_PROPERTY(QString color MEMBER _color CONSTANT)
 
     const QVariantList& getPolygon() const { return _polygon; }
 
 private:
     QVariantList    _polygon;
+    QString         _color;
 };
 
 class CircularAirspaceRestriction : public AirspaceRestriction
@@ -214,6 +217,7 @@ signals:
 private slots:
     void _parseAirspaceJson(QJsonParseError parseError, QJsonDocument airspaceDoc);
     void _error(QNetworkReply::NetworkError code, const QString& errorString, const QString& serverErrorMessage);
+    void _timeout();
 private:
 
     enum class State {
@@ -230,6 +234,7 @@ private:
     QmlObjectListModel      _circleList;
     QList<PolygonAirspaceRestriction*> _nextPolygonList;
     QList<CircularAirspaceRestriction*> _nextcircleList;
+    QTimer          _pollTimer; ///< timer to poll for restriction updates
 };
 
 

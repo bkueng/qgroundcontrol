@@ -295,6 +295,15 @@ AirspaceRestrictionManager::AirspaceRestrictionManager(AirMapNetworking::SharedD
 {
     connect(&_networking, &AirMapNetworking::finished, this, &AirspaceRestrictionManager::_parseAirspaceJson);
     connect(&_networking, &AirMapNetworking::error, this, &AirspaceRestrictionManager::_error);
+    connect(&_pollTimer, &QTimer::timeout, this, &AirspaceRestrictionManager::_timeout);
+    _pollTimer.setSingleShot(false);
+    _pollTimer.start(3000);
+}
+
+void AirspaceRestrictionManager::_timeout()
+{
+    // arguments are not used for this...
+    updateROI(QGeoCoordinate(), 0.f);
 }
 
 void AirspaceRestrictionManager::updateROI(const QGeoCoordinate& center, double radiusMeters)
@@ -342,18 +351,21 @@ void AirspaceRestrictionManager::updateROI(const QGeoCoordinate& center, double 
 
     // Build up the http query
 
-    QUrlQuery airspaceQuery;
+//    QUrlQuery airspaceQuery;
+//
+//    airspaceQuery.addQueryItem(QStringLiteral("latitude"), QString::number(center.latitude(), 'f', 10));
+//    airspaceQuery.addQueryItem(QStringLiteral("longitude"), QString::number(center.longitude(), 'f', 10));
+//    airspaceQuery.addQueryItem(QStringLiteral("weather"), QStringLiteral("true"));
+//    airspaceQuery.addQueryItem(QStringLiteral("buffer"), QString::number(radiusMeters, 'f', 0));
+//
+//    QUrl airMapAirspaceUrl(QStringLiteral("https://api.airmap.com/status/alpha/point"));
+//    airMapAirspaceUrl.setQuery(airspaceQuery);
 
-    airspaceQuery.addQueryItem(QStringLiteral("latitude"), QString::number(center.latitude(), 'f', 10));
-    airspaceQuery.addQueryItem(QStringLiteral("longitude"), QString::number(center.longitude(), 'f', 10));
-    airspaceQuery.addQueryItem(QStringLiteral("weather"), QStringLiteral("true"));
-    airspaceQuery.addQueryItem(QStringLiteral("buffer"), QString::number(radiusMeters, 'f', 0));
-
-    QUrl airMapAirspaceUrl(QStringLiteral("https://api.airmap.com/status/alpha/point"));
-    airMapAirspaceUrl.setQuery(airspaceQuery);
+    // hardcoded city: geneva
+    QUrl airMapAirspaceUrl(QStringLiteral("https://api.airmap.com/manage/airspace/v1/city%7CbowP0n/geometry"));
 
     _state = State::RetrieveList;
-    _networking.get(airMapAirspaceUrl);
+    _networking.get(airMapAirspaceUrl, true);
 }
 
 void AirspaceRestrictionManager::_parseAirspaceJson(QJsonParseError parseError, QJsonDocument airspaceDoc)
@@ -364,21 +376,74 @@ void AirspaceRestrictionManager::_parseAirspaceJson(QJsonParseError parseError, 
     switch(_state) {
         case State::RetrieveList:
         {
-            QSet<QString> advisorySet;
-            const QJsonArray& advisoriesArray = rootObject["data"].toObject()["advisories"].toArray();
-            for (int i=0; i< advisoriesArray.count(); i++) {
-                const QJsonObject& advisoryObject = advisoriesArray[i].toObject();
-                QString advisoryId(advisoryObject["id"].toString());
-                qCDebug(AirMapManagerLog) << "Advisory id: " << advisoryId;
-                advisorySet.insert(advisoryId);
-            }
+//            QSet<QString> advisorySet;
+//            const QJsonArray& advisoriesArray = rootObject["data"].toObject()["advisories"].toArray();
+//            for (int i=0; i< advisoriesArray.count(); i++) {
+//                const QJsonObject& advisoryObject = advisoriesArray[i].toObject();
+//                QString advisoryId(advisoryObject["id"].toString());
+//                qCDebug(AirMapManagerLog) << "Advisory id: " << advisoryId;
+//                advisorySet.insert(advisoryId);
+//            }
+//
+//            for (const auto& advisoryId : advisorySet) {
+//                QUrl url(QStringLiteral("https://api.airmap.com/airspace/v2/")+advisoryId);
+//                _networking.get(url);
+//            }
+//            _numAwaitingItems = advisorySet.size();
+//            _state = State::RetrieveItems;
 
-            for (const auto& advisoryId : advisorySet) {
-                QUrl url(QStringLiteral("https://api.airmap.com/airspace/v2/")+advisoryId);
-                _networking.get(url);
+            _polygonList.clearAndDeleteContents();
+            const QJsonArray& featuresArray = rootObject["data"].toObject()["features"].toArray();
+            for (int i = 0; i < featuresArray.count(); i++) {
+                const QJsonObject& featureObject = featuresArray[i].toObject();
+                const QJsonObject& geometryObject = featureObject["geometry"].toObject();
+                const QJsonObject& propertiesObject = featureObject["properties"].toObject();
+                int authorizationLevel = (int)(propertiesObject["authorization_level"].toDouble()+0.5);
+
+                const char* colors[] = {"green", "yellow", "red"};
+
+                // 1 == green (don't show)
+                if (authorizationLevel <= 1 || authorizationLevel > 3) {
+                    continue;
+                }
+
+                QString geometryType = geometryObject["type"].toString();
+                if (geometryType == "Polygon") {
+                    const QJsonArray& airspaceCoordinates(geometryObject["coordinates"].toArray()[0].toArray());
+                    QString errorString;
+                    QmlObjectListModel list;
+                    if (JsonHelper::loadPolygon(airspaceCoordinates, list, this, errorString)) {
+                        QVariantList polygon;
+                        for (int i = 0; i < list.count(); ++i) {
+                            polygon.append(QVariant::fromValue(((QGCQGeoCoordinate*)list[i])->coordinate()));
+                        }
+                        list.clearAndDeleteContents();
+                        _polygonList.append(new PolygonAirspaceRestriction(polygon, colors[authorizationLevel-1]));
+                    }
+
+                } else if (geometryType == "MultiPolygon") {
+                    // TODO: it's possible that polygons contain holes. These need to be rendered properly
+                    const QJsonArray& polygonArray = geometryObject["coordinates"].toArray();
+                    for (int polygonIdx = 0; polygonIdx < polygonArray.count(); polygonIdx++) {
+                        const QJsonArray& airspaceCoordinates(polygonArray[polygonIdx].toArray()[0].toArray());
+                        QString errorString;
+                        QmlObjectListModel list;
+                        if (JsonHelper::loadPolygon(airspaceCoordinates, list, this, errorString)) {
+                            QVariantList polygon;
+                            for (int i = 0; i < list.count(); ++i) {
+                                polygon.append(QVariant::fromValue(((QGCQGeoCoordinate*)list[i])->coordinate()));
+                            }
+                            list.clearAndDeleteContents();
+                            _polygonList.append(new PolygonAirspaceRestriction(polygon, colors[authorizationLevel-1]));
+                        }
+                    }
+
+                } else {
+                    // TODO
+                }
             }
-            _numAwaitingItems = advisorySet.size();
-            _state = State::RetrieveItems;
+            _state = State::Idle;
+
         }
             break;
 
@@ -405,7 +470,7 @@ void AirspaceRestrictionManager::_parseAirspaceJson(QJsonParseError parseError, 
                             polygon.append(QVariant::fromValue(((QGCQGeoCoordinate*)list[i])->coordinate()));
                         }
                         list.clearAndDeleteContents();
-                        _nextPolygonList.append(new PolygonAirspaceRestriction(polygon));
+                        _nextPolygonList.append(new PolygonAirspaceRestriction(polygon, "yellow"));
                     } else {
                         //TODO
                         qWarning() << errorString;
@@ -1335,9 +1400,9 @@ AirspaceRestriction::AirspaceRestriction(QObject* parent)
 
 }
 
-PolygonAirspaceRestriction::PolygonAirspaceRestriction(const QVariantList& polygon, QObject* parent)
+PolygonAirspaceRestriction::PolygonAirspaceRestriction(const QVariantList& polygon, const QString& color, QObject* parent)
     : AirspaceRestriction(parent)
-    , _polygon(polygon)
+    , _polygon(polygon), _color(color)
 {
 
 }
