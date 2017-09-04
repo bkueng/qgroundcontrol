@@ -657,16 +657,69 @@ void AirMapFlightManager::_uploadFlight()
 
     QJsonObject root;
     QJsonObject geometryObject;
-    geometryObject.insert("type", "LineString");
-    QJsonArray coordinatesArray;
+//    geometryObject.insert("type", "LineString");
+//    QJsonArray coordinatesArray;
+//    for (const auto& coord : _flight.coords) {
+//        QJsonArray coordinate;
+//        coordinate.push_back(coord.longitude());
+//        coordinate.push_back(coord.latitude());
+//        coordinatesArray.push_back(coordinate);
+//    }
+//
+//    geometryObject.insert("coordinates", coordinatesArray);
+
+    // FIXME: using a polygon for now (bounding box), because self-intersecting LineStrings don't render properly
+    // on the AirMap dashboard
+    double lat_min = 1000., lat_max = -1000., lon_min = 1000., lon_max = -1000.;
     for (const auto& coord : _flight.coords) {
+        if (coord.longitude() > lon_max) {
+            lon_max = coord.longitude();
+        } else if (coord.longitude() < lon_min) {
+            lon_min = coord.longitude();
+        }
+        if (coord.latitude() > lat_max) {
+            lat_max = coord.latitude();
+        } else if (coord.latitude() < lat_min) {
+            lat_min = coord.latitude();
+        }
+    }
+    QJsonArray coordinatesArray;
+    geometryObject.insert("type", "Polygon");
+    {
         QJsonArray coordinate;
-        coordinate.push_back(coord.longitude());
-        coordinate.push_back(coord.latitude());
+        coordinate.push_back(lon_min);
+        coordinate.push_back(lat_min);
         coordinatesArray.push_back(coordinate);
     }
+    {
+        QJsonArray coordinate;
+        coordinate.push_back(lon_max);
+        coordinate.push_back(lat_min);
+        coordinatesArray.push_back(coordinate);
+    }
+    {
+        QJsonArray coordinate;
+        coordinate.push_back(lon_max);
+        coordinate.push_back(lat_max);
+        coordinatesArray.push_back(coordinate);
+    }
+    {
+        QJsonArray coordinate;
+        coordinate.push_back(lon_min);
+        coordinate.push_back(lat_max);
+        coordinatesArray.push_back(coordinate);
+    }
+    {
+        QJsonArray coordinate;
+        coordinate.push_back(lon_min);
+        coordinate.push_back(lat_min);
+        coordinatesArray.push_back(coordinate);
+    }
+    QJsonArray polygonList;
+    polygonList.push_back(coordinatesArray);
+    geometryObject.insert("coordinates", polygonList);
 
-    geometryObject.insert("coordinates", coordinatesArray);
+
     root.insert("geometry", geometryObject);
     root.insert("max_altitude_agl", _flight.maxAltitude);
     root.insert("buffer", 2);
