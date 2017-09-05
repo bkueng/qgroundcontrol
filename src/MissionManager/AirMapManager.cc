@@ -393,12 +393,14 @@ void AirspaceRestrictionManager::_parseAirspaceJson(QJsonParseError parseError, 
 //            _state = State::RetrieveItems;
 
             _polygonList.clearAndDeleteContents();
+            std::set<QString> newIds;
             const QJsonArray& featuresArray = rootObject["data"].toObject()["features"].toArray();
             for (int i = 0; i < featuresArray.count(); i++) {
                 const QJsonObject& featureObject = featuresArray[i].toObject();
                 const QJsonObject& geometryObject = featureObject["geometry"].toObject();
                 const QJsonObject& propertiesObject = featureObject["properties"].toObject();
                 int authorizationLevel = (int)(propertiesObject["authorization_level"].toDouble()+0.5);
+                QString id = QString::number(propertiesObject["id"].toDouble());
 
                 const char* colors[] = {"green", "yellow", "red"};
 
@@ -406,6 +408,14 @@ void AirspaceRestrictionManager::_parseAirspaceJson(QJsonParseError parseError, 
                 if (authorizationLevel <= 1 || authorizationLevel > 3) {
                     continue;
                 }
+
+                if (!_knownIds.empty() && _knownIds.find(id) == _knownIds.end()) {
+                    // new polygon added
+                    QString name = propertiesObject["name"].toString();
+                    QString description = propertiesObject["description"].toString();
+                    qgcApp()->showMessage(QString("No fly zone update: %1. %2").arg(name).arg(description));
+                }
+                newIds.insert(id);
 
                 QString geometryType = geometryObject["type"].toString();
                 if (geometryType == "Polygon") {
@@ -442,6 +452,7 @@ void AirspaceRestrictionManager::_parseAirspaceJson(QJsonParseError parseError, 
                     // TODO
                 }
             }
+            _knownIds = newIds;
             _state = State::Idle;
 
         }

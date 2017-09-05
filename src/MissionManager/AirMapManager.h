@@ -28,6 +28,7 @@
 #include <QHostAddress>
 
 #include <stdint.h>
+#include <set>
 
 Q_DECLARE_LOGGING_CATEGORY(AirMapManagerLog)
 
@@ -235,6 +236,7 @@ private:
     QList<PolygonAirspaceRestriction*> _nextPolygonList;
     QList<CircularAirspaceRestriction*> _nextcircleList;
     QTimer          _pollTimer; ///< timer to poll for restriction updates
+    std::set<QString>   _knownIds;
 };
 
 
