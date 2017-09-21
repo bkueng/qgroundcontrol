@@ -144,6 +144,7 @@ void GeoFenceManager::sendToVehicle(const QGeoCoordinate&   breachReturn,
     // send AirMap polygons
     const QmlObjectListModel& airmapPolygons = *_airmapManager->polygonRestrictions();
     for (int i = 0; i < airmapPolygons.count(); ++i) {
+        break;
         PolygonAirspaceRestriction *polygon = (PolygonAirspaceRestriction*)airmapPolygons[i];
         int polygonCount = polygon->getPolygon().count() - 1; // last vertex is equal to the first
         for (int j = 0; j < polygonCount; ++j) {

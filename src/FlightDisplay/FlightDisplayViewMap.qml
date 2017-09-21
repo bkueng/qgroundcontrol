@@ -128,7 +128,7 @@ FlightMap {
 
         onTriggered: {
             _disableVehicleTracking = false
-            updateMapToVehiclePosition()
+            //updateMapToVehiclePosition()
         }
     }
 

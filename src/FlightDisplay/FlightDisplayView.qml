@@ -628,7 +628,7 @@ QGCView {
             spacing: ScreenTools.defaultFontPixelWidth
             anchors.centerIn: parent
             QGCLabel {
-				text: qsTr("AirMap:")
+				text: qsTr("U-space:")
 				anchors.verticalCenter: parent.verticalCenter
 				font.pointSize: ScreenTools.largeFontPointSize
 			}

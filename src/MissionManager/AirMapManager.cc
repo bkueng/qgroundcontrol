@@ -1398,6 +1398,10 @@ void AirMapManager::setToolbox(QGCToolbox* toolbox)
 
     connect(ap->sitaUserReg(),   &Fact::rawValueChanged, this, &AirMapManager::_settingsChanged);
     connect(ap->sitaUavReg(),   &Fact::rawValueChanged, this, &AirMapManager::_settingsChanged);
+
+    //FIXME: if we have an existing flight on startup we end it automatically. This behaviour is probably not
+    //desired, but better for the demo
+    _flightManager.endExistingFlight();
 }
 
 void AirMapManager::_settingsChanged()
