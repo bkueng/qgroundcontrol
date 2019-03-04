@@ -12,6 +12,7 @@
 #include <QObject>
 #include <QVariantList>
 #include <QGeoCoordinate>
+#include <QSharedPointer>
 
 #include "FactGroup.h"
 #include "LinkInterface.h"
@@ -39,6 +40,11 @@ class QGCCameraManager;
 #if defined(QGC_AIRMAP_ENABLED)
 class AirspaceVehicleManager;
 #endif
+
+namespace events {
+class Event;
+class ReceiveProtocol;
+}
 
 Q_DECLARE_LOGGING_CATEGORY(VehicleLog)
 
@@ -1257,6 +1263,8 @@ private:
     void _handleEstimatorStatus(mavlink_message_t& message);
     void _handleStatusText(mavlink_message_t& message, bool longVersion);
     void _handleOrbitExecutionStatus(const mavlink_message_t& message);
+    void _handleEvents(const mavlink_message_t& message);
+    void _handleEvent(const events::Event& event);
     // ArduPilot dialect messages
 #if !defined(NO_ARDUPILOT_DIALECT)
     void _handleCameraFeedback(const mavlink_message_t& message);
@@ -1464,6 +1472,8 @@ private:
     QGCMapCircle    _orbitMapCircle;
     QTimer          _orbitTelemetryTimer;
     static const int _orbitTelemetryTimeoutMsecs = 3000; // No telemetry for this amount and orbit will go inactive
+
+    QMap<uint8_t, QSharedPointer<events::ReceiveProtocol>> _events; // One protocol handler for each component ID
 
     // FactGroup facts
 
