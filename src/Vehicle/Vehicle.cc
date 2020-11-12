@@ -58,6 +58,7 @@
 #endif
 
 #include "Events.h"
+#include "protocol.h"
 
 QGC_LOGGING_CATEGORY(VehicleLog, "VehicleLog")
 
@@ -1451,38 +1452,39 @@ void Vehicle::_handlePing(LinkInterface* link, mavlink_message_t& message)
     sendMessageOnLinkThreadSafe(link, msg);
 }
 
-void Vehicle::_handleEvent(const events::Event& event)
+void Vehicle::_handleEvent(const mavlink_event_t& event)
 {
-    // TODO:
-    // handle special groups (preflight & health)
-    // handle protocols (calibration, ...)
-    if (event.group() == "preflight_checks") {
-        //...
-    }
-
-    // handle the rest: show message according to the log level
-    int severity = -1;
-    switch (event.logLevel()) {
-        case events::LogLevel::Emergency: severity = MAV_SEVERITY_EMERGENCY; break;
-        case events::LogLevel::Alert: severity = MAV_SEVERITY_ALERT; break;
-        case events::LogLevel::Critical: severity = MAV_SEVERITY_CRITICAL; break;
-        case events::LogLevel::Error: severity = MAV_SEVERITY_ERROR; break;
-        case events::LogLevel::Warning: severity = MAV_SEVERITY_WARNING; break;
-        case events::LogLevel::Notice: severity = MAV_SEVERITY_NOTICE; break;
-        case events::LogLevel::Info: severity = MAV_SEVERITY_INFO; break;
-        default: break;
-    }
-    if (severity != -1) {
-        emit textMessageReceived(id(), event.componentId(), severity, QString::fromStdString(event.message()));
-    }
+//    // TODO:
+//    // handle special groups (preflight & health)
+//    // handle protocols (calibration, ...)
+//    if (event.group() == "preflight_checks") {
+//        //...
+//    }
+//
+//    // handle the rest: show message according to the log level
+//    int severity = -1;
+//    switch (event.logLevel()) {
+//        case events::LogLevel::Emergency: severity = MAV_SEVERITY_EMERGENCY; break;
+//        case events::LogLevel::Alert: severity = MAV_SEVERITY_ALERT; break;
+//        case events::LogLevel::Critical: severity = MAV_SEVERITY_CRITICAL; break;
+//        case events::LogLevel::Error: severity = MAV_SEVERITY_ERROR; break;
+//        case events::LogLevel::Warning: severity = MAV_SEVERITY_WARNING; break;
+//        case events::LogLevel::Notice: severity = MAV_SEVERITY_NOTICE; break;
+//        case events::LogLevel::Info: severity = MAV_SEVERITY_INFO; break;
+//        default: break;
+//    }
+//    if (severity != -1) {
+//        emit textMessageReceived(id(), event.componentId(), severity, QString::fromStdString(event.message()));
+//    }
 }
 
 void Vehicle::_handleEvents(const mavlink_message_t& message)
 {
-    auto event_protocol = _events.find(message.compid);
-    if (event_protocol == _events.end()) {
+    auto event_data = _events.find(message.compid);
+    if (event_data == _events.end()) {
 
         auto error_cb = [](int num_events_lost) {
+            // TODO: reset preflight protocol
             qWarning() << "Events got lost:" << num_events_lost;
         };
 
@@ -1497,36 +1499,28 @@ void Vehicle::_handleEvents(const mavlink_message_t& message)
 
         };
 
-        auto unknown_event_cb = [](uint32_t event_id, uint8_t log_levels) {
-            qWarning() << "Received unknown event:" << event_id;
-        };
-
-
-        // TODO: this needs to be loaded from a translated XML, or some other way
-        static const events::Enums enums{
-            {"GPS_FIX", {{0, "No Fix"}, {1, "1D Fix"}, {2, "2D Fix"}, {3, "3D Fix"}}}
-        };
-        using ArgType = events::ArgumentType;
-        static const events::EventMap event_map{
-            {0, {0, "FIRST_EVENT", "First test event", "description", events::LogLevel::Info, "default", {}}},
-            {1, {1, "TEST", "Second test event arg2={2}, arg1={1}", "description", events::LogLevel::Warning, "preflight_checks",
-                    {{ArgType::float_type, -1, 3}, {ArgType::uint32_t_type}}}},
-            {2, {2, "GPS_FIX_TEST", "GPS: {1}", "description", events::LogLevel::Warning, "default",
-                    {{ArgType::uint8_t_type, 0}}}},
-            {3, {3, "TEST_LOGGED", "This message is only logged", "description", events::LogLevel::Disabled, "default",
-                    {{ArgType::uint8_t_type}}}}
-        };
-        static const events::EventMetadata event_metadata{
-            enums, event_map
+        QSharedPointer<QTimer> timer{new QTimer(this)};
+        auto timeout_cb = [timer](int timeout_ms) {
+            if (timeout_ms < 0) {
+                timer->stop();
+            } else {
+                timer->setSingleShot(true);
+                timer->start(timeout_ms);
+            }
         };
 
         events::ReceiveProtocol::Callbacks callbacks{error_cb, send_request_event_message_cb,
-            std::bind(&Vehicle::_handleEvent, this, std::placeholders::_1), unknown_event_cb};
-        event_protocol = _events.insert(message.compid, QSharedPointer<events::ReceiveProtocol>(
-                new events::ReceiveProtocol(event_metadata, callbacks, _mavlink->getSystemId(), _mavlink->getComponentId(),
-                                       message.sysid, message.compid)));
+            std::bind(&Vehicle::_handleEvent, this, std::placeholders::_1), timeout_cb};
+        QSharedPointer<events::ReceiveProtocol> protocol{new events::ReceiveProtocol(callbacks,
+                _mavlink->getSystemId(), _mavlink->getComponentId(),
+                message.sysid, message.compid)};
+
+        event_data = _events.insert(message.compid, {protocol, timer});
+
+        connect(&(*timer), &QTimer::timeout, this, [protocol]() {(*protocol).timerEvent();});
+
     }
-    (*event_protocol)->processMessage(message);
+    (*event_data).protocol->processMessage(message);
 }
 
 void Vehicle::_handleHeartbeat(mavlink_message_t& message)

@@ -921,7 +921,7 @@ private:
     void _handleGimbalOrientation       (const mavlink_message_t& message);
     void _handleObstacleDistance        (const mavlink_message_t& message);
     void _handleEvents(const mavlink_message_t& message);
-    void _handleEvent(const events::Event& event);
+    void _handleEvent(const mavlink_event_t& event);
     // ArduPilot dialect messages
 #if !defined(NO_ARDUPILOT_DIALECT)
     void _handleCameraFeedback          (const mavlink_message_t& message);
@@ -1106,7 +1106,12 @@ private:
     QTimer          _orbitTelemetryTimer;
     static const int _orbitTelemetryTimeoutMsecs = 3000; // No telemetry for this amount and orbit will go inactive
 
-    QMap<uint8_t, QSharedPointer<events::ReceiveProtocol>> _events; // One protocol handler for each component ID
+    struct EventsPerComponent {
+        QSharedPointer<events::ReceiveProtocol> protocol;
+        QSharedPointer<QTimer> timer;
+    };
+
+    QMap<uint8_t, EventsPerComponent> _events; // One protocol handler for each component ID
 
     // PID Tuning telemetry mode
     bool            _pidTuningTelemetryMode = false;
