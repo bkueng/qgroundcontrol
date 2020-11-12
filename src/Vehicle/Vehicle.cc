@@ -1452,8 +1452,22 @@ void Vehicle::_handlePing(LinkInterface* link, mavlink_message_t& message)
     sendMessageOnLinkThreadSafe(link, msg);
 }
 
-void Vehicle::_handleEvent(const mavlink_event_t& event)
+void Vehicle::_handleEvent(const mavlink_event_t& event, QSharedPointer<events::parser::Parser> parser)
 {
+    auto parsed_event = parser->parse(event);
+    if (parsed_event == nullptr) {
+        // TODO: unknown event
+        return;
+    }
+
+    if (parsed_event->group() == "health") {
+        // ... TODO: per-component
+    }
+
+    printf("event: %i, %s: %s\n", parsed_event->id(), parsed_event->name().c_str(), parsed_event->message().c_str());
+
+    // if message empty -> drop it
+
 //    // TODO:
 //    // handle special groups (preflight & health)
 //    // handle protocols (calibration, ...)
@@ -1496,7 +1510,6 @@ void Vehicle::_handleEvents(const mavlink_message_t& message)
                     &message,
                     &msg);
             sendMessageOnLinkThreadSafe(vehicleLinkManager()->primaryLink(), message);
-
         };
 
         QSharedPointer<QTimer> timer{new QTimer(this)};
@@ -1509,13 +1522,18 @@ void Vehicle::_handleEvents(const mavlink_message_t& message)
             }
         };
 
+        QSharedPointer<events::parser::Parser> parser{new events::parser::Parser()};
+
         events::ReceiveProtocol::Callbacks callbacks{error_cb, send_request_event_message_cb,
-            std::bind(&Vehicle::_handleEvent, this, std::placeholders::_1), timeout_cb};
+            std::bind(&Vehicle::_handleEvent, this, std::placeholders::_1, parser), timeout_cb};
         QSharedPointer<events::ReceiveProtocol> protocol{new events::ReceiveProtocol(callbacks,
                 _mavlink->getSystemId(), _mavlink->getComponentId(),
                 message.sysid, message.compid)};
 
-        event_data = _events.insert(message.compid, {protocol, timer});
+        // TODO: load json from COMPONENT_INFO api...
+        parser->loadDefinitionsFile("/tmp/events.json");
+
+        event_data = _events.insert(message.compid, {protocol, timer, parser});
 
         connect(&(*timer), &QTimer::timeout, this, [protocol]() {(*protocol).timerEvent();});
 

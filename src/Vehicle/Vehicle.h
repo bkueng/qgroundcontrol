@@ -71,6 +71,9 @@ class AirspaceVehicleManager;
 namespace events {
 class Event;
 class ReceiveProtocol;
+namespace parser {
+class Parser;
+}
 }
 
 Q_DECLARE_LOGGING_CATEGORY(VehicleLog)
@@ -921,7 +924,7 @@ private:
     void _handleGimbalOrientation       (const mavlink_message_t& message);
     void _handleObstacleDistance        (const mavlink_message_t& message);
     void _handleEvents(const mavlink_message_t& message);
-    void _handleEvent(const mavlink_event_t& event);
+    void _handleEvent(const mavlink_event_t& event, QSharedPointer<events::parser::Parser> parser);
     // ArduPilot dialect messages
 #if !defined(NO_ARDUPILOT_DIALECT)
     void _handleCameraFeedback          (const mavlink_message_t& message);
@@ -1109,6 +1112,7 @@ private:
     struct EventsPerComponent {
         QSharedPointer<events::ReceiveProtocol> protocol;
         QSharedPointer<QTimer> timer;
+        QSharedPointer<events::parser::Parser> parser;
     };
 
     QMap<uint8_t, EventsPerComponent> _events; // One protocol handler for each component ID
