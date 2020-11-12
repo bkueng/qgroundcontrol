@@ -1014,6 +1014,7 @@ HEADERS+= \
     src/FirmwarePlugin/CameraMetaData.h \
     src/FirmwarePlugin/FirmwarePlugin.h \
     src/FirmwarePlugin/FirmwarePluginManager.h \
+    src/Vehicle/Events.h \
     src/VehicleSetup/VehicleComponent.h \
 
 !MobileBuild { !NoSerialBuild {
@@ -1036,6 +1037,7 @@ SOURCES += \
     src/FirmwarePlugin/CameraMetaData.cc \
     src/FirmwarePlugin/FirmwarePlugin.cc \
     src/FirmwarePlugin/FirmwarePluginManager.cc \
+    src/Vehicle/Events.cc \
     src/VehicleSetup/VehicleComponent.cc \
 
 !MobileBuild { !NoSerialBuild {
