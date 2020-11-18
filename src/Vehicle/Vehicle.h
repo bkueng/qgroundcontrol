@@ -73,6 +73,7 @@ class Event;
 class ReceiveProtocol;
 namespace parser {
 class Parser;
+class ParsedEvent;
 }
 }
 
@@ -790,6 +791,7 @@ signals:
     void toolIndicatorsChanged          ();
     void modeIndicatorsChanged          ();
     void textMessageReceived            (int uasid, int componentid, int severity, QString text);
+    void calibrationEventReceived       (int uasid, int componentid, int severity, QSharedPointer<events::parser::ParsedEvent> event);
     void checkListStateChanged          ();
     void messagesReceivedChanged        ();
     void messagesSentChanged            ();
@@ -924,7 +926,7 @@ private:
     void _handleGimbalOrientation       (const mavlink_message_t& message);
     void _handleObstacleDistance        (const mavlink_message_t& message);
     void _handleEvents(const mavlink_message_t& message);
-    void _handleEvent(const mavlink_event_t& event, QSharedPointer<events::parser::Parser> parser);
+    void _handleEvent(uint8_t comp_id, const mavlink_event_t& event, QSharedPointer<events::parser::Parser> parser);
     // ArduPilot dialect messages
 #if !defined(NO_ARDUPILOT_DIALECT)
     void _handleCameraFeedback          (const mavlink_message_t& message);

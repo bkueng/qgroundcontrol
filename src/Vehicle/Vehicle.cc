@@ -57,10 +57,13 @@
 #include "AirspaceVehicleManager.h"
 #endif
 
-#include "Events.h"
-#include "protocol.h"
+#include <libevents/libs/cpp/protocol/receive.h>
+#include <libevents/libs/cpp/parse/parser.h>
+#include <libevents/libs/cpp/generated/events_generated.h>
+Q_DECLARE_METATYPE(QSharedPointer<events::parser::ParsedEvent>);
 
 QGC_LOGGING_CATEGORY(VehicleLog, "VehicleLog")
+QGC_LOGGING_CATEGORY(Events, "Events")
 
 #define UPDATE_TIMER 50
 #define DEFAULT_LAT  38.965767f
@@ -1452,54 +1455,70 @@ void Vehicle::_handlePing(LinkInterface* link, mavlink_message_t& message)
     sendMessageOnLinkThreadSafe(link, msg);
 }
 
-void Vehicle::_handleEvent(const mavlink_event_t& event, QSharedPointer<events::parser::Parser> parser)
+void Vehicle::_handleEvent(uint8_t comp_id, const mavlink_event_t& event, QSharedPointer<events::parser::Parser> parser)
 {
-    auto parsed_event = parser->parse(event);
+    std::unique_ptr<events::parser::ParsedEvent> parsed_event = parser->parse(event);
     if (parsed_event == nullptr) {
-        // TODO: unknown event
+        qCWarning(Events) << "Got Event w/o known metadata: ID:" << event.id << "comp id:" << comp_id;
         return;
     }
 
-    if (parsed_event->group() == "health") {
-        // ... TODO: per-component
+    qCDebug(Events) << "Got Event: ID:" << parsed_event->id() << "namespace:" << parsed_event->eventNamespace().c_str() <<
+            "name:" << parsed_event->name().c_str() << "msg:" << parsed_event->message().c_str();
+
+    int severity = -1;
+    switch (events::externalLogLevel(event.log_levels)) {
+        case events::Log::Emergency: severity = MAV_SEVERITY_EMERGENCY; break;
+        case events::Log::Alert: severity = MAV_SEVERITY_ALERT; break;
+        case events::Log::Critical: severity = MAV_SEVERITY_CRITICAL; break;
+        case events::Log::Error: severity = MAV_SEVERITY_ERROR; break;
+        case events::Log::Warning: severity = MAV_SEVERITY_WARNING; break;
+        case events::Log::Notice: severity = MAV_SEVERITY_NOTICE; break;
+        case events::Log::Info: severity = MAV_SEVERITY_INFO; break;
+        default: break;
     }
 
-    printf("event: %i, %s: %s\n", parsed_event->id(), parsed_event->name().c_str(), parsed_event->message().c_str());
+    // handle special groups (preflight & health)
+    if (parsed_event->group() == "health") {
+        // ... TODO: per-component
 
-    // if message empty -> drop it
+        // these are displayed separately
+        return;
+    }
 
-//    // TODO:
-//    // handle special groups (preflight & health)
-//    // handle protocols (calibration, ...)
-//    if (event.group() == "preflight_checks") {
-//        //...
-//    }
-//
-//    // handle the rest: show message according to the log level
-//    int severity = -1;
-//    switch (event.logLevel()) {
-//        case events::LogLevel::Emergency: severity = MAV_SEVERITY_EMERGENCY; break;
-//        case events::LogLevel::Alert: severity = MAV_SEVERITY_ALERT; break;
-//        case events::LogLevel::Critical: severity = MAV_SEVERITY_CRITICAL; break;
-//        case events::LogLevel::Error: severity = MAV_SEVERITY_ERROR; break;
-//        case events::LogLevel::Warning: severity = MAV_SEVERITY_WARNING; break;
-//        case events::LogLevel::Notice: severity = MAV_SEVERITY_NOTICE; break;
-//        case events::LogLevel::Info: severity = MAV_SEVERITY_INFO; break;
-//        default: break;
-//    }
-//    if (severity != -1) {
-//        emit textMessageReceived(id(), event.componentId(), severity, QString::fromStdString(event.message()));
-//    }
+    if (parsed_event->group() == "calibration") {
+        emit calibrationEventReceived(id(), comp_id, severity,
+                QSharedPointer<events::parser::ParsedEvent>{new events::parser::ParsedEvent{*parsed_event}});
+        // these are displayed separately
+        return;
+    }
+
+    // show message according to the log level
+    if (severity != -1) {
+        std::string message = parsed_event->message();
+        std::string description = parsed_event->description();
+        if (message.size() > 0) {
+            // TODO: handle this properly in the UI (e.g. with an expand button to display the description, clickable URL's + params)...
+            QString msg = QString::fromStdString(message);
+            if (description.size() > 0) {
+                msg += "<br/><small><small>" + QString::fromStdString(description).replace("\n", "<br/>") + "</small></small>";
+            }
+            emit textMessageReceived(id(), comp_id, severity, msg);
+        }
+    }
 }
 
 void Vehicle::_handleEvents(const mavlink_message_t& message)
 {
     auto event_data = _events.find(message.compid);
     if (event_data == _events.end()) {
+        // add new component
 
-        auto error_cb = [](int num_events_lost) {
-            // TODO: reset preflight protocol
-            qWarning() << "Events got lost:" << num_events_lost;
+        uint8_t compid = message.compid;
+        auto error_cb = [compid](int num_events_lost) {
+            // TODO: reset preflight  protocol & calibration
+
+            qCWarning(Events) << "Events got lost:" << num_events_lost << "comp_id:" << compid;
         };
 
         auto send_request_event_message_cb = [this](const mavlink_request_event_t& msg) {
@@ -1524,21 +1543,27 @@ void Vehicle::_handleEvents(const mavlink_message_t& message)
 
         QSharedPointer<events::parser::Parser> parser{new events::parser::Parser()};
 
+        parser->setProfile("dev"); // TODO: should be configurable
+
+        parser->formatters().url = [](const std::string& content, const std::string& link) {
+            return "<a href=\""+link+"\">"+content+"</a>"; };
+
         events::ReceiveProtocol::Callbacks callbacks{error_cb, send_request_event_message_cb,
-            std::bind(&Vehicle::_handleEvent, this, std::placeholders::_1, parser), timeout_cb};
+            std::bind(&Vehicle::_handleEvent, this, message.compid, std::placeholders::_1, parser), timeout_cb};
         QSharedPointer<events::ReceiveProtocol> protocol{new events::ReceiveProtocol(callbacks,
-                _mavlink->getSystemId(), _mavlink->getComponentId(),
-                message.sysid, message.compid)};
+                _mavlink->getSystemId(), _mavlink->getComponentId(), message.sysid, message.compid)};
+
+        connect(&(*timer), &QTimer::timeout, this, [protocol]() { protocol->timerEvent(); });
 
         // TODO: load json from COMPONENT_INFO api...
         parser->loadDefinitionsFile("/tmp/events.json");
 
         event_data = _events.insert(message.compid, {protocol, timer, parser});
 
-        connect(&(*timer), &QTimer::timeout, this, [protocol]() {(*protocol).timerEvent();});
-
+        qRegisterMetaType<QSharedPointer<events::parser::ParsedEvent>>("ParsedEvent");
     }
-    (*event_data).protocol->processMessage(message);
+
+    event_data->protocol->processMessage(message);
 }
 
 void Vehicle::_handleHeartbeat(mavlink_message_t& message)
