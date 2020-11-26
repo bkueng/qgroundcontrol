@@ -21,6 +21,9 @@
 #include "FactPanelController.h"
 #include "QGCLoggingCategory.h"
 
+#include <libevents/libs/cpp/parse/parser.h>
+#include <libevents/libs/cpp/generated/events_generated.h>
+
 Q_DECLARE_LOGGING_CATEGORY(SensorsComponentControllerLog)
 
 /// Sensors Component MVC Controller for SensorsComponent.qml.
@@ -96,6 +99,7 @@ signals:
 
 private slots:
     void _handleUASTextMessage(int uasId, int compId, int severity, QString text);
+    void _handleCalibrationEvent(int uasid, int componentid, int severity, QSharedPointer<events::parser::ParsedEvent> event);
     
 private:
     void _startLogCalibration(void);
@@ -113,6 +117,9 @@ private:
     void _stopCalibration(StopCalibrationCode code);
     
     void _updateAndEmitShowOrientationCalArea(bool show);
+
+    void _firstProgressEventReceived(events::common::enums::calibration_type_t calibration_type,
+            events::common::enums::calibration_sides_t required_sides);
 
     QQuickItem* _statusLog;
     QQuickItem* _progressBar;
@@ -163,6 +170,7 @@ private:
     bool _orientationCalTailDownSideRotate;
     
     bool _unknownFirmwareVersion;
+    bool _receivedProgressEvent;
     bool _waitingForCancel;
     
     static const int _supportedFirmwareCalVersion = 2;

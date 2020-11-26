@@ -16,6 +16,8 @@
 #include <QVariant>
 #include <QQmlProperty>
 
+using namespace events::common;
+
 QGC_LOGGING_CATEGORY(SensorsComponentControllerLog, "SensorsComponentControllerLog")
 
 SensorsComponentController::SensorsComponentController(void)
@@ -93,9 +95,11 @@ void SensorsComponentController::_appendStatusLog(const QString& text)
 void SensorsComponentController::_startLogCalibration(void)
 {
     _unknownFirmwareVersion = false;
+    _receivedProgressEvent = false;
     _hideAllCalAreas();
     
-    connect(_vehicle, &Vehicle::textMessageReceived, this, &SensorsComponentController::_handleUASTextMessage);
+    //connect(_vehicle, &Vehicle::textMessageReceived, this, &SensorsComponentController::_handleUASTextMessage);
+    connect(_vehicle, &Vehicle::calibrationEventReceived, this, &SensorsComponentController::_handleCalibrationEvent);
     
     _cancelButton->setEnabled(false);
 }
@@ -143,7 +147,8 @@ void SensorsComponentController::_resetInternalState(void)
 
 void SensorsComponentController::_stopCalibration(SensorsComponentController::StopCalibrationCode code)
 {
-    disconnect(_vehicle, &Vehicle::textMessageReceived, this, &SensorsComponentController::_handleUASTextMessage);
+//    disconnect(_vehicle, &Vehicle::textMessageReceived, this, &SensorsComponentController::_handleUASTextMessage);
+    disconnect(_vehicle, &Vehicle::calibrationEventReceived, this, &SensorsComponentController::_handleCalibrationEvent);
     
     _compassButton->setEnabled(true);
     _gyroButton->setEnabled(true);
@@ -223,6 +228,232 @@ void SensorsComponentController::calibrateAirspeed(void)
 {
     _startLogCalibration();
     _vehicle->startCalibration(Vehicle::CalibrationPX4Airspeed);
+}
+
+void SensorsComponentController::_handleCalibrationEvent(int uasid, int componentid, int severity,
+        QSharedPointer<events::parser::ParsedEvent> event)
+{
+    Q_UNUSED(componentid);
+
+    if (uasid != _vehicle->id()) {
+        return;
+    }
+    switch ((event_id_t)event->id()) {
+        case event_id_t::cal_progress:
+            uint8_t proto_ver;
+            int8_t progress;
+            enums::calibration_type_t calibration_type;
+            enums::calibration_sides_t required_sides;
+            decode_cal_progress(event->eventData(), proto_ver, progress, calibration_type, required_sides);
+            // TODO: ensure proto_ver == 1
+
+            if (!_receivedProgressEvent) {
+                _startVisualCalibration();
+                _firstProgressEventReceived(calibration_type, required_sides);
+                _receivedProgressEvent = true;
+            }
+            if (_progressBar) {
+                _progressBar->setProperty("value", progress / 100.0f);
+            } else {
+                qWarning() << "Internal error";
+            }
+        break;
+        case event_id_t::cal_orientation_detected: {
+            enums::calibration_sides_t orientation;
+            enums::calibration_action_t action;
+            decode_cal_orientation_detected(event->eventData(), orientation, action);
+            switch(orientation) {
+                case enums::calibration_sides_t::down:
+                    _orientationCalDownSideInProgress = true;
+                    if (_magCalInProgress) {
+                        _orientationCalDownSideRotate = true;
+                    }
+                    break;
+                case enums::calibration_sides_t::upside_down:
+                    _orientationCalUpsideDownSideInProgress = true;
+                    if (_magCalInProgress) {
+                        _orientationCalUpsideDownSideRotate = true;
+                    }
+                    break;
+                case enums::calibration_sides_t::left_side_down:
+                    _orientationCalLeftSideInProgress = true;
+                    if (_magCalInProgress) {
+                        _orientationCalLeftSideRotate = true;
+                    }
+                    break;
+                case enums::calibration_sides_t::right_side_down:
+                    _orientationCalRightSideInProgress = true;
+                    if (_magCalInProgress) {
+                        _orientationCalRightSideRotate = true;
+                    }
+                    break;
+                case enums::calibration_sides_t::nose_down:
+                    _orientationCalNoseDownSideInProgress = true;
+                    if (_magCalInProgress) {
+                        _orientationCalNoseDownSideRotate = true;
+                    }
+                    break;
+                case enums::calibration_sides_t::tail_down:
+                    _orientationCalTailDownSideInProgress = true;
+                    if (_magCalInProgress) {
+                        _orientationCalTailDownSideRotate = true;
+                    }
+                    break;
+            }
+
+            switch (action) {
+                case enums::calibration_action_t::hold_still:
+                    _orientationCalAreaHelpText->setProperty("text", tr("Hold still in the current orientation"));
+                    break;
+                case enums::calibration_action_t::rotate:
+                    _orientationCalAreaHelpText->setProperty("text", tr("Rotate the vehicle continuously as shown in the diagram until marked as Completed"));
+                    break;
+                case enums::calibration_action_t::already_completed:
+                    _orientationCalAreaHelpText->setProperty("text", tr("Orientation already completed, place you vehicle into one of the incomplete orientations shown below and hold it still"));
+                    break;
+                case enums::calibration_action_t::next_orientation:
+                    _orientationCalAreaHelpText->setProperty("text", tr("Place you vehicle into one of the orientations shown below and hold it still"));
+                    break;
+            }
+
+            emit orientationCalSidesInProgressChanged();
+            emit orientationCalSidesRotateChanged();
+        }
+        break;
+
+        case event_id_t::cal_orientation_done: {
+            enums::calibration_sides_t orientation;
+            enums::calibration_action_t action;
+            decode_cal_orientation_done(event->eventData(), orientation, action);
+            switch(orientation) {
+                case enums::calibration_sides_t::down:
+                    _orientationCalDownSideInProgress = false;
+                    _orientationCalDownSideDone = true;
+                    _orientationCalDownSideRotate = false;
+                    break;
+                case enums::calibration_sides_t::upside_down:
+                    _orientationCalUpsideDownSideInProgress = false;
+                    _orientationCalUpsideDownSideDone = true;
+                    _orientationCalUpsideDownSideRotate = false;
+                    break;
+                case enums::calibration_sides_t::left_side_down:
+                    _orientationCalLeftSideInProgress = false;
+                    _orientationCalLeftSideDone = true;
+                    _orientationCalLeftSideRotate = false;
+                    break;
+                case enums::calibration_sides_t::right_side_down:
+                    _orientationCalRightSideInProgress = false;
+                    _orientationCalRightSideDone = true;
+                    _orientationCalRightSideRotate = false;
+                    break;
+                case enums::calibration_sides_t::nose_down:
+                    _orientationCalNoseDownSideInProgress = false;
+                    _orientationCalNoseDownSideDone = true;
+                    _orientationCalNoseDownSideRotate = false;
+                    break;
+                case enums::calibration_sides_t::tail_down:
+                    _orientationCalTailDownSideInProgress = false;
+                    _orientationCalTailDownSideDone = true;
+                    _orientationCalTailDownSideRotate = false;
+                    break;
+            }
+
+            _orientationCalAreaHelpText->setProperty("text", tr("Place you vehicle into one of the orientations shown below and hold it still"));
+
+            emit orientationCalSidesInProgressChanged();
+            emit orientationCalSidesDoneChanged();
+            emit orientationCalSidesRotateChanged();
+        }
+        break;
+
+        case event_id_t::cal_done: {
+            enums::calibration_result_t result;
+            decode_cal_done(event->eventData(), result);
+            switch(result) {
+                case enums::calibration_result_t::success:
+                    _stopCalibration(StopCalibrationSuccess);
+                    break;
+                case enums::calibration_result_t::aborted:
+                    _stopCalibration(_waitingForCancel ? StopCalibrationCancelled : StopCalibrationFailed);
+                    break;
+                case enums::calibration_result_t::failed:
+                    _stopCalibration(StopCalibrationFailed);
+                    break;
+            }
+        }
+        break;
+        default: break;
+    }
+
+    if (severity != -1) {
+        QString message = QString::fromStdString(event->message());
+        _appendStatusLog(message);
+        qCDebug(SensorsComponentControllerLog) << message;
+    }
+}
+
+void SensorsComponentController::_firstProgressEventReceived(events::common::enums::calibration_type_t calibration_type,
+            events::common::enums::calibration_sides_t required_sides)
+{
+    if (calibration_type == enums::calibration_type_t::accel || calibration_type == enums::calibration_type_t::mag
+            || calibration_type == enums::calibration_type_t::gyro) {
+        // Reset all progress indication
+        _orientationCalDownSideDone = false;
+        _orientationCalUpsideDownSideDone = false;
+        _orientationCalLeftSideDone = false;
+        _orientationCalRightSideDone = false;
+        _orientationCalTailDownSideDone = false;
+        _orientationCalNoseDownSideDone = false;
+        _orientationCalDownSideInProgress = false;
+        _orientationCalUpsideDownSideInProgress = false;
+        _orientationCalLeftSideInProgress = false;
+        _orientationCalRightSideInProgress = false;
+        _orientationCalNoseDownSideInProgress = false;
+        _orientationCalTailDownSideInProgress = false;
+
+        // Reset all visibility
+        _orientationCalDownSideVisible = false;
+        _orientationCalUpsideDownSideVisible = false;
+        _orientationCalLeftSideVisible = false;
+        _orientationCalRightSideVisible = false;
+        _orientationCalTailDownSideVisible = false;
+        _orientationCalNoseDownSideVisible = false;
+
+        _orientationCalAreaHelpText->setProperty("text", tr("Place your vehicle into one of the Incomplete orientations shown below and hold it still"));
+
+        if (calibration_type == enums::calibration_type_t::accel) {
+            _accelCalInProgress = true;
+            _orientationCalDownSideVisible = true;
+            _orientationCalUpsideDownSideVisible = true;
+            _orientationCalLeftSideVisible = true;
+            _orientationCalRightSideVisible = true;
+            _orientationCalTailDownSideVisible = true;
+            _orientationCalNoseDownSideVisible = true;
+        } else if (calibration_type == enums::calibration_type_t::accel) {
+
+            int sides = (int)required_sides;
+            _magCalInProgress = true;
+            _orientationCalTailDownSideVisible =   (sides & (1 << 0));
+            _orientationCalNoseDownSideVisible =   (sides & (1 << 1));
+            _orientationCalLeftSideVisible =       (sides & (1 << 2));
+            _orientationCalRightSideVisible =      (sides & (1 << 3));
+            _orientationCalUpsideDownSideVisible = (sides & (1 << 4));
+            _orientationCalDownSideVisible =       (sides & (1 << 5));
+        } else if (calibration_type == enums::calibration_type_t::gyro) {
+            _gyroCalInProgress = true;
+            _orientationCalDownSideVisible = true;
+        } else {
+            qWarning() << "Unknown calibration message type" << (int)calibration_type;
+        }
+        emit orientationCalSidesDoneChanged();
+        emit orientationCalSidesVisibleChanged();
+        emit orientationCalSidesInProgressChanged();
+        _updateAndEmitShowOrientationCalArea(true);
+    } else if (calibration_type == enums::calibration_type_t::airspeed) {
+        _airspeedCalInProgress = true;
+    } else if (calibration_type == enums::calibration_type_t::level) {
+        _levelCalInProgress = true;
+    }
 }
 
 void SensorsComponentController::_handleUASTextMessage(int uasId, int compId, int severity, QString text)
